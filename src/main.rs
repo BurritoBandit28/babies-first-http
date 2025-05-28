@@ -1,8 +1,9 @@
-use std::{fs, io};
+use std::{env, fs, io};
 use std::fmt::format;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::net::Shutdown::Write as ShutdownWrite;
+use dotenv::dotenv;
 use crate::Method::{GET, POST};
 
 struct Request<'a> {
@@ -50,16 +51,29 @@ fn handle_client(mut stream: TcpStream) {
     stream.read(&mut buf).expect("Failed to read");
 
     let mut raw_request = String::from_utf8_lossy(&buf[..]);
-    
+
     println!("Request : \n{}", raw_request);
+
+    if raw_request.is_empty() {
+        return;
+    }
 
     let mut request = Request::default();
 
     let parts : Vec<&str>= raw_request.lines().next().unwrap().split_ascii_whitespace().collect();
 
+    if parts.get(1).is_none() {
+        return;
+    }
+    let raw_target = parts.get(1).unwrap().to_string();
+    
     request.method = Method::parse(parts.get(0).unwrap());
-    request.target = parts.get(1).unwrap().to_string();
+    request.target = if !raw_target.starts_with("/website"){ format!("/website{}",raw_target)} else { raw_target };
     request.protocol = parts.get(2).unwrap().to_string();
+
+    if request.target == "/website/" {
+        request.target = "/website/index.html".to_string();
+    }
 
     for hdrs in raw_request.lines() {
         if hdrs.starts_with("data") {
@@ -79,7 +93,7 @@ fn handle_client(mut stream: TcpStream) {
 
     if request.method == POST{
         if request.data.is_some() {
-            println!("{}", request.data.unwrap())
+            println!("{} from {}", request.data.unwrap(), stream.peer_addr().unwrap())
         }
     }
 
@@ -89,14 +103,21 @@ fn handle_client(mut stream: TcpStream) {
     else if request.target.ends_with(".png") {
         "image/png"
     }
+    else if request.target.ends_with(".svg") {
+        "image/svg+xml"
+    }
+    else if request.target.ends_with(".ico") {
+        "image/x-icon"
+    }
     else {
         "text/html"
     };
-    
-    if request.doc_type == "image" {
 
-        let image = fs::read(format!(".{}", request.target)).expect("Failed to read image");
-        let mut head = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: {}\r\n\r\n", content);
+    if request.accept.contains(&"image/png") || request.target.ends_with(".png") ||  request.target.ends_with(".ico") ||  request.target.ends_with(".svg") {
+
+        let image = fs::read(format!(".{}", request.target)).expect(format!("Failed to read image at {}", request.target).as_str());
+        let mut head = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: {}\r\n\r\n", content
+        );
         let response = [head.as_bytes(), image.as_slice()].concat();
 
         stream.write_all(response.as_slice()).expect("Write failed!");
@@ -104,24 +125,32 @@ fn handle_client(mut stream: TcpStream) {
 
     }
     else {
-        if request.target.ends_with(".png") {
-            let mut response = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: text/html\r\n\r\n<body style=\"background: #121212;\"><img src=\"{}\"></img></body>",request.target);
-            stream.write_all(response.as_bytes()).expect("Write failed!");
-            stream.flush().unwrap()
-        }
-        else {
-            let body = fs::read_to_string(format!(".{}", request.target)).expect("Failed to read body");
-            let mut response = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: {}\r\n\r\n{}",content,body);
-            stream.write_all(response.as_bytes()).expect("Write failed!");
-            stream.flush().unwrap()
-        }
+        let body = fs::read_to_string(format!(".{}", request.target)).expect(format!("Failed to read body at {}", request.target).as_str());
+        let mut response = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: {}\r\n\r\n{}",content,body);
+        stream.write_all(response.as_bytes()).expect("Write failed!");
+        stream.flush().unwrap()
+
     }
 }
 
 
 fn main() -> io::Result<()> {
 
-    let mut listener = TcpListener::bind("localhost:80");
+    let mut address : String = "".to_string();
+    let mut port : String = "".to_string();
+
+    dotenv().ok();
+    for (key, value) in env::vars() {
+        match key.as_str() {
+            "ADDRESS" => {address = value}
+            "PORT" => {port = value}
+            _ => {}
+        }
+    }
+
+    open::that(format!("http://{}",address )).expect("Failed to open page");
+
+    let mut listener = TcpListener::bind(format!("{}:{}",address,port));
 
     for stream in listener?.incoming() {
         handle_client(stream?)

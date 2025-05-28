@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.98"
+dotenv = "0.15.0"
+open = "5.3.2"
