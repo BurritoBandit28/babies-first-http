@@ -44,7 +44,7 @@ impl Method {
     }
 }
 
-fn handle_client(mut stream: TcpStream) {
+fn handle_client(mut stream: TcpStream, chat: &mut Vec<String>) {
 
     let mut buf = [0u8;1024];
 
@@ -52,7 +52,7 @@ fn handle_client(mut stream: TcpStream) {
 
     let mut raw_request = String::from_utf8_lossy(&buf[..]);
 
-    println!("Request : \n{}", raw_request);
+    //println!("Request : \n{}", raw_request);
 
     if raw_request.is_empty() {
         return;
@@ -93,24 +93,31 @@ fn handle_client(mut stream: TcpStream) {
 
     if request.method == POST{
         if request.data.is_some() {
-            println!("{} from {}", request.data.unwrap(), stream.peer_addr().unwrap())
+            println!("{} from {}", request.data.clone().unwrap(), stream.peer_addr().unwrap());
+            chat.push(format!("{} says: {}", stream.peer_addr().unwrap() ,request.data.unwrap()))
         }
     }
 
-    let content = if request.target.ends_with(".css") {
-        "text/css"
-    }
-    else if request.target.ends_with(".png") {
-        "image/png"
-    }
-    else if request.target.ends_with(".svg") {
-        "image/svg+xml"
-    }
-    else if request.target.ends_with(".ico") {
-        "image/x-icon"
-    }
-    else {
-        "text/html"
+    let ext : Vec<&str>= request.target.split(".").collect();
+
+    let content = match ext.last().unwrap() {
+
+        &"css" => {
+            "text/css"
+        },
+        &"png" => {
+          "image/png"
+        }
+        &"svg" => {
+            "image/svg+xml"
+        }
+        &"ico" => {
+            "image/x-icon"
+        }
+        _ => {
+            "text/html"
+        }
+
     };
 
     if request.accept.contains(&"image/png") || request.target.ends_with(".png") ||  request.target.ends_with(".ico") ||  request.target.ends_with(".svg") {
@@ -125,7 +132,16 @@ fn handle_client(mut stream: TcpStream) {
 
     }
     else {
-        let body = fs::read_to_string(format!(".{}", request.target)).expect(format!("Failed to read body at {}", request.target).as_str());
+        let mut body = fs::read_to_string(format!(".{}", request.target)).expect(format!("Failed to read body at {}", request.target).as_str());
+
+        let mut web_chat = String::new();
+
+        for message in chat {
+            web_chat = format!("{}{}<br>", web_chat,message);
+        }
+
+        body = body.replace("$CHAT", web_chat.as_str());
+
         let mut response = format!("HTTP/1.1 200 OK\r\nServer: Rust TCP server\r\nContent-Type: {}\r\n\r\n{}",content,body);
         stream.write_all(response.as_bytes()).expect("Write failed!");
         stream.flush().unwrap()
@@ -135,6 +151,8 @@ fn handle_client(mut stream: TcpStream) {
 
 
 fn main() -> io::Result<()> {
+
+    let mut chat : Vec<String>= vec![];
 
     let mut address : String = "".to_string();
     let mut port : String = "".to_string();
@@ -153,7 +171,7 @@ fn main() -> io::Result<()> {
     let mut listener = TcpListener::bind(format!("{}:{}",address,port));
 
     for stream in listener?.incoming() {
-        handle_client(stream?)
+        handle_client(stream?, &mut chat)
     }
 
 

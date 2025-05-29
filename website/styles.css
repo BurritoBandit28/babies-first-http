@@ -18,3 +18,10 @@ body {
     transform: scale(1.08) ;
     margin-bottom: -10px;
 }
+
+#chat {
+
+    background-color: aquamarine;
+    color: #121212;
+
+}
